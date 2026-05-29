@@ -14,5 +14,9 @@ fun main(args: Array<String>) {
     val dataDir = Path.of(args.getOrNull(1) ?: "data")
     val maxSegmentBytes = args.getOrNull(2)?.toLongOrNull() ?: Log.DEFAULT_MAX_SEGMENT_BYTES
     val indexIntervalBytes = args.getOrNull(3)?.toIntOrNull() ?: Log.DEFAULT_INDEX_INTERVAL_BYTES
-    BrokerServer(port, dataDir, maxSegmentBytes, indexIntervalBytes).start()
+    // FETCH zero-copy on/off. 측정 결과 localhost loopback에선 heap 경로가 더 빨라(§11.7)
+    // 기본값은 false(heap). zero-copy의 이득은 실제 NIC+대규모 연결에서 나온다.
+    // 켜려면 MYKAFKA_FETCH_ZEROCOPY=true
+    val zeroCopyFetch = System.getenv("MYKAFKA_FETCH_ZEROCOPY")?.lowercase() == "true"
+    BrokerServer(port, dataDir, maxSegmentBytes, indexIntervalBytes, zeroCopyFetch).start()
 }

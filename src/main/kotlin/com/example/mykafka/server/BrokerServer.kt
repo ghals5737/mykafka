@@ -19,6 +19,7 @@ class BrokerServer(
     private val dataDir: Path,
     private val maxSegmentBytes: Long = Log.DEFAULT_MAX_SEGMENT_BYTES,
     private val indexIntervalBytes: Int = Log.DEFAULT_INDEX_INTERVAL_BYTES,
+    private val zeroCopyFetch: Boolean = false,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
@@ -38,7 +39,7 @@ class BrokerServer(
                         ch.pipeline()
                             .addLast("decoder", FrameDecoder())
                             .addLast("encoder", FrameEncoder())
-                            .addLast("router", RequestRouter(logManager, offsetStore))
+                            .addLast("router", RequestRouter(logManager, offsetStore, zeroCopyFetch))
                     }
                 })
 

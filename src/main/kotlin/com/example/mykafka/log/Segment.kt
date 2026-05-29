@@ -203,6 +203,67 @@ class Segment(
         return goodPos
     }
 
+    // zero-copy FETCH용. record를 **디코드하지 않고** 헤더(길이 필드)만 읽어,
+    // 전송할 파일 구간 [position, position+length) 와 record 수를 계산한다.
+    //   - readFrom과 동일한 규칙: startOffset 미만 record skip, maxBytes 한도, 첫 record는 무조건 포함.
+    //   - key/value를 heap에 올리지 않는다 → 이후 broker가 transferTo로 페이지캐시→소켓 직행.
+    // 반환: 보낼 게 없으면 null.
+    fun regionFrom(startOffset: Long, maxBytes: Int): RegionSpan? {
+        if (startOffset < baseOffset || startOffset >= nextOffset) return null
+        val rel = (startOffset - baseOffset).toInt()
+        var pos = index.lookup(rel)[1].toLong()
+
+        val hdr = ByteBuffer.allocate(20) // offset(8)+timestamp(8)+keyLen(4)
+        val vlBuf = ByteBuffer.allocate(4) // valueLen(4)
+        var regionStart = -1L
+        var length = 0
+        var count = 0
+        var lastOffset = -1L
+
+        while (pos < sizeBytes) {
+            hdr.clear()
+            if (readFullyAt(pos, hdr) < 20) break
+            hdr.flip()
+            val offset = hdr.long
+            hdr.long // timestamp (skip)
+            val keyLen = hdr.int
+            val keyBytes = if (keyLen == -1) 0 else keyLen
+            vlBuf.clear()
+            if (readFullyAt(pos + 20 + keyBytes, vlBuf) < 4) break
+            vlBuf.flip()
+            val valueLen = vlBuf.int
+            val recSize = 20 + keyBytes + 4 + valueLen + 4 // +crc(4)
+
+            if (offset < startOffset) { pos += recSize; continue } // sparse index가 약간 앞에서 시작
+            if (regionStart < 0) regionStart = pos
+            if (count > 0 && length + recSize > maxBytes) break     // 첫 record는 무조건 포함
+            length += recSize
+            count++
+            lastOffset = offset
+            pos += recSize
+        }
+        return if (count == 0) null else RegionSpan(regionStart, length, count, lastOffset)
+    }
+
+    // 채널 위치를 바꾸지 않는 positional read (append와 채널 공유해도 안전).
+    private fun readFullyAt(position: Long, buf: ByteBuffer): Int {
+        var p = position
+        var total = 0
+        while (buf.hasRemaining()) {
+            val n = channel.read(buf, p)
+            if (n < 0) break
+            p += n
+            total += n
+        }
+        return total
+    }
+
+    data class RegionSpan(val position: Long, val length: Int, val count: Int, val lastOffset: Long)
+
+    // zero-copy 전송용. 이 세그먼트의 .log 채널(이미 열려 있음)을 노출.
+    // SharedFileRegion이 positional transferTo로만 사용하고 닫지 않는다.
+    fun logChannel(): FileChannel = channel
+
     fun indexEntryCount(): Int = index.entryCount
 
     fun close() {

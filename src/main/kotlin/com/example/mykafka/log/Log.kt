@@ -108,6 +108,35 @@ class Log(
         return out
     }
 
+    // zero-copy FETCH용. read()와 같은 규칙이되 record를 디코드하지 않고
+    // "보낼 파일 구간 목록"을 반환한다. segment 경계를 넘으면 region이 여러 개가 된다
+    // (각 region은 한 segment 파일 안의 연속 바이트 → transferTo 한 번).
+    fun fetchRegions(startOffset: Long, maxBytes: Int): List<FetchRegionRef> {
+        if (startOffset >= nextOffset) return emptyList()
+        var idx = segmentIndexFor(startOffset) ?: return emptyList()
+
+        val out = mutableListOf<FetchRegionRef>()
+        var bytesUsed = 0
+        var off = startOffset
+        while (idx <= segments.lastIndex) {
+            if (out.isNotEmpty() && bytesUsed >= maxBytes) break
+            val budget = if (out.isEmpty()) maxBytes else (maxBytes - bytesUsed)
+            val span = segments[idx].regionFrom(off, budget) ?: break
+            out.add(FetchRegionRef(segments[idx].logChannel(), span.position, span.length, span.count))
+            bytesUsed += span.length
+            off = span.lastOffset + 1
+            idx++
+        }
+        return out
+    }
+
+    data class FetchRegionRef(
+        val channel: java.nio.channels.FileChannel,
+        val position: Long,
+        val length: Int,
+        val count: Int,
+    )
+
     // 디버그/검증용: 모든 segment 직렬 스캔.
     fun readAll(): List<Record> {
         val out = mutableListOf<Record>()

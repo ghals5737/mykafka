@@ -67,6 +67,9 @@ import java.nio.charset.StandardCharsets
 class RequestRouter(
     private val logManager: LogManager,
     private val offsetStore: OffsetStore,
+    // FETCH 응답을 zero-copy(transferTo/FileRegion)로 보낼지. false면 기존 heap 복사 경로.
+    // 기본 false: localhost loopback에선 heap이 더 빠름(§11.7). 실 NIC면 zero-copy가 유리.
+    private val zeroCopyFetch: Boolean = false,
 ) : SimpleChannelInboundHandler<Frame>() {
     private val slog = LoggerFactory.getLogger(javaClass)
 
@@ -154,12 +157,19 @@ class RequestRouter(
             ctx.writeAndFlush(fetchResp(errCode = 1, recordsBytes = ByteArray(0), count = 0))
             return
         }
+
+        if (zeroCopyFetch) {
+            handleFetchZeroCopy(ctx, topic, partition, log, offset, maxBytes)
+            return
+        }
+
+        // ── 기존 heap 경로 (A/B 비교용) ──
+        // 디스크 → 디코드 → 동일 바이트 재인코딩 → heap 병합 → 소켓. 복사가 많다.
         val recs = log.read(offset, maxBytes)
         slog.info(
-            "FETCH topic={} partition={} offset={} maxBytes={} returned={}",
+            "FETCH(heap) topic={} partition={} offset={} maxBytes={} returned={}",
             topic, partition, offset, maxBytes, recs.size,
         )
-        // record bytes 연결
         val perRecord = recs.map { RecordCodec.encode(it.offset, it.timestamp, it.key, it.value) }
         val totalLen = perRecord.sumOf { it.size }
         val merged = ByteArray(totalLen)
@@ -168,6 +178,39 @@ class RequestRouter(
             System.arraycopy(b, 0, merged, p, b.size); p += b.size
         }
         ctx.writeAndFlush(fetchResp(errCode = 0, recordsBytes = merged, count = recs.size))
+    }
+
+    // zero-copy FETCH 응답.
+    //   resp wire: [totalLength:4][apiKey:1][errCode:1][recordCount:4][record bytes…] (기존과 동일)
+    //   record bytes는 디스크 파일 구간을 DefaultFileRegion(=transferTo)으로 직접 전송 → JVM heap 안 거침.
+    //   헤더 ByteBuf와 FileRegion은 Frame이 아니므로 FrameEncoder를 그대로 통과한다.
+    private fun handleFetchZeroCopy(
+        ctx: ChannelHandlerContext,
+        topic: String,
+        partition: Int,
+        log: com.example.mykafka.log.Log,
+        offset: Long,
+        maxBytes: Int,
+    ) {
+        val regions = log.fetchRegions(offset, maxBytes)
+        val count = regions.sumOf { it.count }
+        val totalBytes = regions.sumOf { it.length }
+        slog.info(
+            "FETCH(zero-copy) topic={} partition={} offset={} maxBytes={} returned={} bytes={} regions={}",
+            topic, partition, offset, maxBytes, count, totalBytes, regions.size,
+        )
+        // 헤더: totalLength = apiKey(1) + errCode(1) + recordCount(4) + 전송 바이트
+        val header = ctx.alloc().buffer(4 + 1 + 1 + 4)
+        header.writeInt(1 + 1 + 4 + totalBytes)
+        header.writeByte(ApiKey.FETCH.code.toInt())
+        header.writeByte(0) // errCode = OK
+        header.writeInt(count)
+        ctx.write(header)
+        for (r in regions) {
+            // 세그먼트의 열린 채널을 재사용(fetch당 open 없음) + 전송 후 채널 안 닫음.
+            if (r.length > 0) ctx.write(SharedFileRegion(r.channel, r.position, r.length.toLong()))
+        }
+        ctx.flush()
     }
 
     private fun handleCommitOffset(ctx: ChannelHandlerContext, payload: ByteBuf) {
