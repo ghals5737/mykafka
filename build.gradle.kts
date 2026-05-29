@@ -20,6 +20,26 @@ application {
     mainClass.set("com.example.mykafka.MainKt")
 }
 
+// 학습용 client demo 실행 task
+//   ./gradlew producerDemo     (broker가 9092 에 떠 있어야 함)
+tasks.register<JavaExec>("producerDemo") {
+    group = "demo"
+    description = "Run the Producer client demo (requires broker on :9092)"
+    dependsOn("classes")
+    mainClass.set("com.example.mykafka.client.ProducerDemoKt")
+    classpath = sourceSets.main.get().runtimeClasspath
+    standardInput = System.`in`
+}
+
+tasks.register<JavaExec>("consumerDemo") {
+    group = "demo"
+    description = "Run the Consumer client demo (requires broker on :9092 + topic seeded)"
+    dependsOn("classes")
+    mainClass.set("com.example.mykafka.client.ConsumerDemoKt")
+    classpath = sourceSets.main.get().runtimeClasspath
+    standardInput = System.`in`
+}
+
 kotlin {
     jvmToolchain(17)
     compilerOptions {
