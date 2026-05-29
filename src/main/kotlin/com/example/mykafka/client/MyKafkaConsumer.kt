@@ -23,15 +23,26 @@ import java.nio.charset.StandardCharsets
 //     안 하면 재시작 시 처음부터(또는 어디부터 시작할지 application 결정).
 //   - Replay 자유: 어떤 offset이든 다시 fetch 가능. (실 Kafka도 동일)
 class MyKafkaConsumer(
-    host: String = "localhost",
-    port: Int = 9092,
+    private val host: String = "localhost",
+    private val port: Int = 9092,
     val group: String,
 ) : AutoCloseable {
-    private val socket: Socket = Socket(host, port)
-    private val out = DataOutputStream(socket.getOutputStream().buffered())
-    private val input = DataInputStream(socket.getInputStream().buffered())
+    private var socket: Socket = newSocket()
+    private var out = DataOutputStream(socket.getOutputStream().buffered())
+    private var input = DataInputStream(socket.getInputStream().buffered())
 
-    init { socket.tcpNoDelay = true }
+    private fun newSocket(): Socket = Socket(host, port).also { it.tcpNoDelay = true }
+
+    // 소켓이 깨졌을 때(broker 다운/재시작, wire desync) 호출 → 기존 연결 닫고 새로 연다.
+    // 단일 스레드(폴링 스레드)에서만 호출한다는 전제. 실패하면 던지므로 호출자가 재시도.
+    fun reconnect() {
+        runCatching { input.close() }
+        runCatching { out.close() }
+        runCatching { socket.close() }
+        socket = newSocket()
+        out = DataOutputStream(socket.getOutputStream().buffered())
+        input = DataInputStream(socket.getInputStream().buffered())
+    }
 
     data class FetchResult(
         val records: List<Record>,
