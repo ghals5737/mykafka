@@ -39,6 +39,44 @@ class MyKafkaConsumer(
         val nextOffset: Long,
     )
 
+    data class Assignment(
+        val memberId: String,
+        val generation: Int,
+        val partitions: List<Int>, // 이 멤버가 담당할 파티션들
+        val partitionCount: Int,   // 토픽 전체 파티션 수
+    )
+
+    // 이 consumer 인스턴스의 멤버 식별자. 첫 join 때 broker가 발급, 이후 재join에 재사용.
+    private var memberId: String = ""
+
+    // ── JOIN_GROUP ───────────────────────────────────────────────────────
+    // group에 가입(또는 lease 갱신)하고 담당 파티션을 받는다. 주기적으로 다시 호출 = heartbeat.
+    //   req : [groupLen:2][group][topicLen:2][topic][memberIdLen:2][memberId][sessionTimeoutMs:4]
+    //   resp: [errCode:1][memberIdLen:2][memberId][generation:4][partitionCount:4][assignedCount:4][p:4]…
+    fun joinGroup(topic: String, sessionTimeoutMs: Int = 10_000): Assignment {
+        val groupBytes = group.toByteArray(StandardCharsets.UTF_8)
+        val topicBytes = topic.toByteArray(StandardCharsets.UTF_8)
+        val memberBytes = memberId.toByteArray(StandardCharsets.UTF_8)
+        sendFrame(ApiKey.JOIN_GROUP) { buf ->
+            buf.writeShort(groupBytes.size); buf.write(groupBytes)
+            buf.writeShort(topicBytes.size); buf.write(topicBytes)
+            buf.writeShort(memberBytes.size); buf.write(memberBytes)
+            buf.writeInt(sessionTimeoutMs)
+        }
+        val (apiKey, _) = readFrameHeader()
+        check(apiKey == ApiKey.JOIN_GROUP) { "expected JOIN_GROUP response, got $apiKey" }
+        val errCode = input.readByte().toInt()
+        if (errCode != 0) error("JOIN_GROUP errCode=$errCode (1=UNKNOWN_TOPIC)")
+        val mLen = input.readShort().toInt()
+        val mId = ByteArray(mLen).also { input.readFully(it) }.toString(Charsets.UTF_8)
+        val generation = input.readInt()
+        val partitionCount = input.readInt()
+        val assignedCount = input.readInt()
+        val parts = (0 until assignedCount).map { input.readInt() }
+        memberId = mId
+        return Assignment(mId, generation, parts, partitionCount)
+    }
+
     // ── FETCH ────────────────────────────────────────────────────────────
     // req : [topicLen:2][topic][partition:4][offset:8][maxBytes:4]
     // resp: [errCode:1][recordCount:4][record1 bytes][record2 bytes]…

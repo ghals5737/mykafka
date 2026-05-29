@@ -3,6 +3,7 @@ package com.example.mykafka.server
 import com.example.mykafka.log.RecordCodec
 import com.example.mykafka.protocol.ApiKey
 import com.example.mykafka.protocol.Frame
+import com.example.mykafka.topic.GroupCoordinator
 import com.example.mykafka.topic.LogManager
 import com.example.mykafka.topic.OffsetStore
 import io.netty.buffer.ByteBuf
@@ -67,6 +68,7 @@ import java.nio.charset.StandardCharsets
 class RequestRouter(
     private val logManager: LogManager,
     private val offsetStore: OffsetStore,
+    private val groupCoordinator: GroupCoordinator,
     // FETCH 응답을 zero-copy(transferTo/FileRegion)로 보낼지. false면 기존 heap 복사 경로.
     // 기본 false: localhost loopback에선 heap이 더 빠름(§11.7). 실 NIC면 zero-copy가 유리.
     private val zeroCopyFetch: Boolean = false,
@@ -81,6 +83,7 @@ class RequestRouter(
                 ApiKey.CREATE_TOPIC -> handleCreateTopic(ctx, msg.payload)
                 ApiKey.COMMIT_OFFSET -> handleCommitOffset(ctx, msg.payload)
                 ApiKey.FETCH_OFFSET -> handleFetchOffset(ctx, msg.payload)
+                ApiKey.JOIN_GROUP -> handleJoinGroup(ctx, msg.payload)
             }
         } finally {
             msg.payload.release()
@@ -234,6 +237,41 @@ class RequestRouter(
             writeLong(offset)
         }
         ctx.writeAndFlush(Frame(ApiKey.FETCH_OFFSET, resp))
+    }
+
+    // JOIN_GROUP — consumer group 가입/lease 갱신 + 파티션 할당.
+    //   req : [groupLen:2][group][topicLen:2][topic][memberIdLen:2][memberId][sessionTimeoutMs:4]
+    //   resp: [errCode:1][memberIdLen:2][memberId][generation:4][partitionCount:4][assignedCount:4][p:4]…
+    //         errCode: 0=OK, 1=UNKNOWN_TOPIC
+    private fun handleJoinGroup(ctx: ChannelHandlerContext, payload: ByteBuf) {
+        val group = readString(payload)
+        val topic = readString(payload)
+        val memberId = readString(payload)
+        val sessionTimeoutMs = payload.readInt()
+
+        val partitionCount = logManager.describeTopics()[topic]
+        if (partitionCount == null) {
+            val resp = Unpooled.buffer().apply {
+                writeByte(1); writeShort(0); writeInt(0); writeInt(0); writeInt(0)
+            }
+            ctx.writeAndFlush(Frame(ApiKey.JOIN_GROUP, resp))
+            return
+        }
+
+        val r = groupCoordinator.join(group, memberId, sessionTimeoutMs.toLong(), partitionCount)
+        slog.info(
+            "JOIN_GROUP group={} member={} gen={} assigned={}",
+            group, r.memberId, r.generation, r.assigned,
+        )
+        val mb = r.memberId.toByteArray(StandardCharsets.UTF_8)
+        val resp = Unpooled.buffer()
+        resp.writeByte(0)
+        resp.writeShort(mb.size); resp.writeBytes(mb)
+        resp.writeInt(r.generation)
+        resp.writeInt(partitionCount)
+        resp.writeInt(r.assigned.size)
+        r.assigned.forEach { resp.writeInt(it) }
+        ctx.writeAndFlush(Frame(ApiKey.JOIN_GROUP, resp))
     }
 
     private fun produceResp(errCode: Int, partition: Int, baseOffset: Long, count: Int): Frame {

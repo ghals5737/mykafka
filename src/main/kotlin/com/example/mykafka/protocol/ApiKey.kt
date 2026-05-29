@@ -7,7 +7,8 @@ enum class ApiKey(val code: Byte) {
     FETCH(1),
     CREATE_TOPIC(2),
     COMMIT_OFFSET(3),
-    FETCH_OFFSET(4);
+    FETCH_OFFSET(4),
+    JOIN_GROUP(5);
 
     companion object {
         fun from(code: Byte): ApiKey =

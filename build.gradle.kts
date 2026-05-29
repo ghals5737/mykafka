@@ -40,6 +40,15 @@ tasks.register<JavaExec>("consumerDemo") {
     standardInput = System.`in`
 }
 
+// Consumer group 자동 파티션 할당 데모.
+tasks.register<JavaExec>("groupDemo") {
+    group = "demo"
+    description = "Consumer group partition assignment demo (requires broker on :9092)"
+    dependsOn("classes")
+    mainClass.set("com.example.mykafka.client.GroupDemoKt")
+    classpath = sourceSets.main.get().runtimeClasspath
+}
+
 // FETCH 처리량 벤치 (zero-copy vs heap). broker를 MYKAFKA_FETCH_ZEROCOPY on/off로 각각 띄우고 실행.
 tasks.register<JavaExec>("fetchBench") {
     group = "demo"

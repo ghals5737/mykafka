@@ -3,6 +3,7 @@ package com.example.mykafka.server
 import com.example.mykafka.log.Log
 import com.example.mykafka.protocol.FrameDecoder
 import com.example.mykafka.protocol.FrameEncoder
+import com.example.mykafka.topic.GroupCoordinator
 import com.example.mykafka.topic.LogManager
 import com.example.mykafka.topic.OffsetStore
 import io.netty.bootstrap.ServerBootstrap
@@ -28,6 +29,7 @@ class BrokerServer(
         val workerGroup = NioEventLoopGroup()
         val logManager = LogManager(dataDir, maxSegmentBytes, indexIntervalBytes)
         val offsetStore = OffsetStore(logManager)
+        val groupCoordinator = GroupCoordinator()
         try {
             val bootstrap = ServerBootstrap()
                 .group(bossGroup, workerGroup)
@@ -39,7 +41,7 @@ class BrokerServer(
                         ch.pipeline()
                             .addLast("decoder", FrameDecoder())
                             .addLast("encoder", FrameEncoder())
-                            .addLast("router", RequestRouter(logManager, offsetStore, zeroCopyFetch))
+                            .addLast("router", RequestRouter(logManager, offsetStore, groupCoordinator, zeroCopyFetch))
                     }
                 })
 
