@@ -1,4 +1,6 @@
-package com.example.mykafka.protocol
+package com.example.mykafka.broker
+
+import com.example.mykafka.protocol.ApiKey
 
 import io.netty.buffer.ByteBuf
 import io.netty.channel.ChannelHandlerContext

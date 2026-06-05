@@ -1,8 +1,8 @@
 package com.example.mykafka.server
 
-import com.example.mykafka.log.RecordCodec
+import com.example.mykafka.protocol.RecordCodec
 import com.example.mykafka.protocol.ApiKey
-import com.example.mykafka.protocol.Frame
+import com.example.mykafka.broker.Frame
 import com.example.mykafka.topic.GroupCoordinator
 import com.example.mykafka.topic.LogManager
 import com.example.mykafka.topic.OffsetStore

@@ -1,7 +1,7 @@
 package com.example.mykafka.client
 
-import com.example.mykafka.log.Record
-import com.example.mykafka.log.RecordCodec
+import com.example.mykafka.protocol.Record
+import com.example.mykafka.protocol.RecordCodec
 import com.example.mykafka.protocol.ApiKey
 import java.io.ByteArrayOutputStream
 import java.io.DataInputStream

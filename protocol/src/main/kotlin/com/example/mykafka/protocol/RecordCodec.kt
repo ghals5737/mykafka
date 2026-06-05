@@ -1,4 +1,4 @@
-package com.example.mykafka.log
+package com.example.mykafka.protocol
 
 import java.nio.ByteBuffer
 import java.util.zip.CRC32

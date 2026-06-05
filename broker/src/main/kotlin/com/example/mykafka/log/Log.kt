@@ -1,5 +1,8 @@
 package com.example.mykafka.log
 
+import com.example.mykafka.protocol.Record
+import com.example.mykafka.protocol.RecordCodec
+
 import org.slf4j.LoggerFactory
 import java.nio.file.Files
 import java.nio.file.Path

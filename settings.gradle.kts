@@ -1,1 +1,3 @@
-rootProject.name = "MyKafka"
+rootProject.name = "mykafka"
+
+include("protocol", "client", "broker")

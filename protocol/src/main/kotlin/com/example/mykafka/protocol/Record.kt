@@ -1,4 +1,4 @@
-package com.example.mykafka.log
+package com.example.mykafka.protocol
 
 // 한 메시지 = 한 Record.
 //

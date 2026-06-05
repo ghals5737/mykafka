@@ -1,5 +1,8 @@
 package com.example.mykafka.log
 
+import com.example.mykafka.protocol.Record
+import com.example.mykafka.protocol.RecordCodec
+
 import java.nio.ByteBuffer
 import java.nio.channels.FileChannel
 import java.nio.file.Path
