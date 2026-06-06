@@ -34,6 +34,45 @@ dependencies {
 }
 ```
 
+## 빠른 시작 — 토이 프로젝트에 SDK처럼 (브로커 임베드)
+
+브로커를 따로 띄우기 귀찮으면 **broker 모듈도 의존성에 넣고 코드에서 데몬 스레드로 임베드**하면
+한 프로세스로 끝납니다. (Kafka도 브로커는 필요하지만, 여기선 코드에 박을 수 있어 토이용으로 편함.)
+
+```kotlin
+// build.gradle.kts
+//   implementation("com.github.ghals5737.mykafka:client:v0.1.0")
+//   implementation("com.github.ghals5737.mykafka:broker:v0.1.0")
+
+import com.example.mykafka.client.MyKafkaConsumer
+import com.example.mykafka.client.MyKafkaProducer
+import com.example.mykafka.server.BrokerServer
+import java.nio.file.Path
+
+fun main() {
+    // 1) 브로커 임베드 (데몬 스레드로 띄우고 잠깐 대기)
+    Thread { BrokerServer(port = 9092, dataDir = Path.of("data")).start() }
+        .apply { isDaemon = true; start() }
+    Thread.sleep(500)
+
+    // 2) 발행
+    MyKafkaProducer().use { p ->
+        p.createTopic("events", partitionCount = 1)  // 토이: 단일 파티션 단순화
+        p.produce("events", key = null, value = "hello", partition = 0)
+    }
+
+    // 3) 소비
+    MyKafkaConsumer(group = "my-app").use { c ->
+        val r = c.fetch("events", partition = 0, offset = 0)
+        r.records.forEach { println(String(it.value)) }     // → hello
+        c.commitOffset("events", partition = 0, offset = r.nextOffset)
+    }
+}
+```
+
+> 실제 서비스에 붙이는 예는 더 아래 [사용 예제](#사용-예제)(파티션·key 라우팅, consumer group)를 참고.
+> broker를 임베드하지 않고 **별도 프로세스**로 띄우려면 아래 [브로커 실행](#브로커-실행)을 보세요.
+
 ## 사용 예제
 
 ### Producer
